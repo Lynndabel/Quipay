@@ -4,6 +4,7 @@ import ConnectAccount from "./components/ConnectAccount.tsx";
 import { Routes, Route, Outlet, NavLink } from "react-router-dom";
 import Home from "./pages/Home";
 import Debugger from "./pages/Debugger.tsx";
+import Reports from "./pages/Reports.tsx";
 
 const AppLayout: React.FC = () => (
   <main>
@@ -12,7 +13,25 @@ const AppLayout: React.FC = () => (
       projectTitle="My App"
       contentRight={
         <>
-          <nav>
+          <nav style={{ display: "flex", gap: "0.25rem" }}>
+            <NavLink
+              to="/reports"
+              style={{
+                textDecoration: "none",
+              }}
+            >
+              {({ isActive }) => (
+                <Button
+                  variant="tertiary"
+                  size="md"
+                  onClick={() => (window.location.href = "/reports")}
+                  disabled={isActive}
+                >
+                  <Icon.Download04 size="md" />
+                  Reports
+                </Button>
+              )}
+            </NavLink>
             <NavLink
               to="/debug"
               style={{
@@ -58,6 +77,7 @@ function App() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/" element={<Home />} />
+        <Route path="/reports" element={<Reports />} />
         <Route path="/debug" element={<Debugger />} />
         <Route path="/debug/:contractName" element={<Debugger />} />
       </Route>
