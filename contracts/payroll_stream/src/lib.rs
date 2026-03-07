@@ -1,12 +1,13 @@
 #![no_std]
 use quipay_common::{QuipayError, require};
-use soroban_sdk::{Address, Env, IntoVal, Symbol, Vec, contract, contractimpl, contracttype};
+use soroban_sdk::{Address, BytesN, Env, IntoVal, Symbol, Vec, contract, contractimpl, contracttype};
 
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
     Paused,
+    Version,
     NextStreamId,
     RetentionSecs,
     Vault,
@@ -20,6 +21,15 @@ pub enum StreamStatus {
     Active = 0,
     Canceled = 1,
     Completed = 2,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VersionInfo {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+    pub upgraded_at: u64,
 }
 
 #[contracttype]
@@ -74,6 +84,16 @@ impl PayrollStream {
         env.storage()
             .instance()
             .set(&DataKey::RetentionSecs, &DEFAULT_RETENTION_SECS);
+        
+        // Set initial version
+        let initial_version = VersionInfo {
+            major: 1,
+            minor: 0,
+            patch: 0,
+            upgraded_at: env.ledger().timestamp(),
+        };
+        env.storage().instance().set(&DataKey::Version, &initial_version);
+        
         Ok(())
     }
 
@@ -93,6 +113,37 @@ impl PayrollStream {
             .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false)
+    }
+
+    /// Upgrade the contract to a new WASM implementation.
+    /// Only the admin can call this function.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), QuipayError> {
+        // Require admin authorization
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(QuipayError::NotInitialized)?;
+        admin.require_auth();
+
+        // Check not paused
+        Self::require_not_paused(&env)?;
+
+        // Execute the upgrade
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+
+        // Emit event
+        env.events().publish(("upgrade",), (new_wasm_hash,));
+
+        Ok(())
+    }
+
+    /// Get the current version information.
+    pub fn version(env: Env) -> Result<VersionInfo, QuipayError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .ok_or(QuipayError::VersionNotSet)
     }
 
     pub fn set_retention_secs(env: Env, retention_secs: u64) -> Result<(), QuipayError> {

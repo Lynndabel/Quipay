@@ -1,7 +1,7 @@
 #![no_std]
 use quipay_common::{QuipayError, require};
 use soroban_sdk::{
-    Address, Bytes, Env, IntoVal, Symbol, Vec, contract, contractimpl, contracttype, symbol_short,
+    Address, Bytes, BytesN, Env, IntoVal, Symbol, Vec, contract, contractimpl, contracttype, symbol_short,
     vec,
 };
 
@@ -19,6 +19,15 @@ pub enum Permission {
 
 #[contracttype]
 #[derive(Clone, Debug)]
+pub struct VersionInfo {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+    pub upgraded_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
 pub struct Agent {
     pub address: Address,
     pub permissions: Vec<Permission>,
@@ -28,6 +37,8 @@ pub struct Agent {
 #[contracttype]
 pub enum DataKey {
     Admin,
+    Paused,
+    Version,
     Agent(Address),
     PayrollStream,
 }
@@ -44,7 +55,75 @@ impl AutomationGateway {
             QuipayError::AlreadyInitialized
         );
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
+        
+        // Set initial version
+        let initial_version = VersionInfo {
+            major: 1,
+            minor: 0,
+            patch: 0,
+            upgraded_at: env.ledger().timestamp(),
+        };
+        env.storage().instance().set(&DataKey::Version, &initial_version);
+        
         Ok(())
+    }
+
+    /// Set the paused state of the contract.
+    /// Only the admin can call this.
+    pub fn set_paused(env: Env, paused: bool) -> Result<(), QuipayError> {
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        Ok(())
+    }
+
+    /// Check if the contract is paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    /// Assert that the contract is not paused.
+    fn require_not_paused(env: &Env) -> Result<(), QuipayError> {
+        if env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+        {
+            return Err(QuipayError::ProtocolPaused);
+        }
+        Ok(())
+    }
+
+    /// Upgrade the contract to a new WASM implementation.
+    /// Only the admin can call this function.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), QuipayError> {
+        // Require admin authorization
+        let admin = Self::get_admin(env.clone())?;
+        admin.require_auth();
+
+        // Check not paused
+        Self::require_not_paused(&env)?;
+
+        // Execute the upgrade
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+
+        // Emit event
+        env.events().publish(("upgrade",), (new_wasm_hash,));
+
+        Ok(())
+    }
+
+    /// Get the current version information.
+    pub fn version(env: Env) -> Result<VersionInfo, QuipayError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .ok_or(QuipayError::VersionNotSet)
     }
 
     /// Replace an agent's permissions.
